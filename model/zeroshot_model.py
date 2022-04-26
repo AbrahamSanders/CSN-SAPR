@@ -28,8 +28,9 @@ class CSN_Zeroshot(nn.Module):
                 accum_char_len.append(accum_char_len[-1] + cdd_sent_char_lens[sent_idx])
             quoted_sentences.append(cdd_CSS[accum_char_len[cdd_quote_idx]:accum_char_len[cdd_quote_idx + 1]])
         
-        prompts = [f"文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n答案是"
         #prompts = [f"Text:'{css}'\n\nQuestion: yes or no: did {alias} say {quoted}?\n\nAnswer:"
+        #prompts = [f"文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n回答："
+        prompts = [f"文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n答案是"
                    for css, alias, quoted in zip(CSSs, candidate_aliases, quoted_sentences)]
         prompts = [p.replace("“", '"').replace("”", '"') for p in prompts]
         inputs = self.tokenizer(prompts, padding=True, add_special_tokens=False, return_tensors="pt").to(device)

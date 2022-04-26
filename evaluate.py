@@ -20,7 +20,7 @@ from model.zeroshot_model import CSN_Zeroshot
 from sapr.sap_rev import Prediction, sap_rev
 
 
-def evaluate(checkpoint_dir, eval_file_path, zero_shot=False):
+def evaluate(checkpoint_dir, eval_file_path):
     """
     arg
         checkpoint_dir: the saved checkpoint of CSN model
@@ -29,6 +29,8 @@ def evaluate(checkpoint_dir, eval_file_path, zero_shot=False):
     output
         Evalution result files under checkpoint_dir
     """
+    zero_shot = checkpoint_dir == "CSNZeroshot"
+
     parser = ArgumentParser()
     args = parser.parse_args()
     with open(os.path.join(checkpoint_dir, 'info.json'), 'r', encoding='utf-8') as fin:
@@ -56,7 +58,7 @@ def evaluate(checkpoint_dir, eval_file_path, zero_shot=False):
 
     # initialize model
     if zero_shot:
-        model = CSN_Zeroshot("EleutherAI/gpt-neo-125M")
+        model = CSN_Zeroshot(args.bert_pretrained_dir)
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         model = CSN(args)
@@ -191,6 +193,6 @@ def evaluate(checkpoint_dir, eval_file_path, zero_shot=False):
 
 
 if __name__ == '__main__':
-    CHECKPOINT_DIR = 'CSN/20220425160525'
+    CHECKPOINT_DIR = 'CSNZeroshot'
     TEST_FILE_PATH = './data/test/test_unsplit.txt'
-    evaluate(CHECKPOINT_DIR, TEST_FILE_PATH, zero_shot=True)
+    evaluate(CHECKPOINT_DIR, TEST_FILE_PATH)
