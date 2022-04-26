@@ -16,10 +16,11 @@ from utils.bert_features import *
 from utils.training_control import *
 from utils.load_name_list import *
 from model.model import CSN
+from model.zeroshot_model import CSN_Zeroshot
 from sapr.sap_rev import Prediction, sap_rev
 
 
-def evaluate(checkpoint_dir, eval_file_path):
+def evaluate(checkpoint_dir, eval_file_path, zero_shot=False):
     """
     arg
         checkpoint_dir: the saved checkpoint of CSN model
@@ -54,9 +55,12 @@ def evaluate(checkpoint_dir, eval_file_path):
     print(mention_poses)
 
     # initialize model
-    tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
-    model = CSN(args)
-    model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'csn.ckpt'), map_location='cpu')['model'])
+    if zero_shot:
+        model = CSN_Zeroshot("EleutherAI/gpt-neo-125M")
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
+        model = CSN(args)
+        model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'csn.ckpt'), map_location='cpu')['model'])
     model = model.to(device)
 
     # Evaluation
@@ -71,8 +75,11 @@ def evaluate(checkpoint_dir, eval_file_path):
         in progress_bar(test_data, total=len(test_data)):
 
         with torch.no_grad():
-            features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
-            scores, _, _ = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+            if zero_shot:
+                scores, _, _ = model(CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+            else:
+                features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
+                scores, _, _ = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
 
         # continuous conversation correction
         candidate_aliases = [CSS[cdd_pos[1]:cdd_pos[2]] for cdd_pos, CSS in zip(mention_poses, CSSs)]
@@ -184,6 +191,6 @@ def evaluate(checkpoint_dir, eval_file_path):
 
 
 if __name__ == '__main__':
-    CHECKPOINT_DIR = ''
+    CHECKPOINT_DIR = 'CSN/20220425160525'
     TEST_FILE_PATH = './data/test/test_unsplit.txt'
-    evaluate(CHECKPOINT_DIR, TEST_FILE_PATH)
+    evaluate(CHECKPOINT_DIR, TEST_FILE_PATH, zero_shot=True)

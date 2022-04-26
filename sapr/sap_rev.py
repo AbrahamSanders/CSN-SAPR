@@ -146,7 +146,7 @@ def sap_rev(pred_list, alias2id, th):
 
 	ctn_quotes_list = retrieve_continuous_quotes(pred_list)
 
-	name_list_path = '/home/ychen/183/codes_and_scripts/IdentifySpeaker/CSN_SAPR/data/name_list.txt'
+	name_list_path = 'data/name_list.txt'
 	with open(name_list_path, 'r', encoding='utf-8') as fin:
 		name_lines = fin.readlines()
 	id2alias = []

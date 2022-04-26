@@ -26,7 +26,7 @@ from model.model import CSN
 
 # training log
 LOG_FORMAT = '%(asctime)s %(name)s %(levelname)s %(pathname)s %(message)s'
-DATE_FORMAT = '%Y-%m-%d %H:%m:%s %a'
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S %a'
 
 
 def train():
