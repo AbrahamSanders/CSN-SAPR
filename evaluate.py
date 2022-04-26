@@ -58,7 +58,7 @@ def evaluate(checkpoint_dir, eval_file_path):
 
     # initialize model
     if zero_shot:
-        model = CSN_Zeroshot(args.bert_pretrained_dir)
+        model = CSN_Zeroshot(args)
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         model = CSN(args)

@@ -1,24 +1,27 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch.nn as nn
-#import torch
-
-#from utils.tokenize_helpers import tokenize_with_left_truncation
+import torch
 
 class CSN_Zeroshot(nn.Module):
-    def __init__(self, model_path):
+    def __init__(self, args):
         super(CSN_Zeroshot, self).__init__()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         if not self.tokenizer._pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model = AutoModelForCausalLM.from_pretrained(model_path)
-        #self.model_max_length = self.model.config.max_position_embeddings
+        self.model = AutoModelForCausalLM.from_pretrained(args.bert_pretrained_dir)
+        self.loss_fct = nn.CrossEntropyLoss(reduction="none")
         
-        self.yes_token_ids = self.tokenizer.convert_tokens_to_ids(["对", "是", "正"])
-        self.no_token_ids = self.tokenizer.convert_tokens_to_ids(["错", "否", "不"])
-        #self.yes_token_idx = self.tokenizer.convert_tokens_to_ids("yes")
-        #self.no_token_idx = self.tokenizer.convert_tokens_to_ids("no")
-        self.softmax = nn.Softmax(dim=-1)
-        
+        if args.prompt_lang == "zh":
+            self.prompt = "文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n"
+            self.prompt += "答案是" if args.prompt_style == "answer_is" else "回答："
+            self.prompt_yes = "是的"
+            self.prompt_no = "不对"
+        else:
+            self.prompt = "Text:'{css}'\n\nQuestion: The one who said {quoted} is {alias}. True or false?\n\n"
+            self.prompt += "The answer is" if args.prompt_style == "answer_is" else "Answer:"
+            self.prompt_yes = " true"
+            self.prompt_no = " false"
+            
     def forward(self, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device):
         candidate_aliases = [CSS[cdd_pos[1]:cdd_pos[2]] for cdd_pos, CSS in zip(mention_poses, CSSs)]
         quoted_sentences = []
@@ -28,24 +31,35 @@ class CSN_Zeroshot(nn.Module):
                 accum_char_len.append(accum_char_len[-1] + cdd_sent_char_lens[sent_idx])
             quoted_sentences.append(cdd_CSS[accum_char_len[cdd_quote_idx]:accum_char_len[cdd_quote_idx + 1]])
         
-        #prompts = [f"Text:'{css}'\n\nQuestion: yes or no: did {alias} say {quoted}?\n\nAnswer:"
-        #prompts = [f"文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n回答："
-        prompts = [f"文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n答案是"
+        prompts = [self.prompt.format(css=css, alias=alias, quoted=quoted)
                    for css, alias, quoted in zip(CSSs, candidate_aliases, quoted_sentences)]
         prompts = [p.replace("“", '"').replace("”", '"') for p in prompts]
-        inputs = self.tokenizer(prompts, padding=True, add_special_tokens=False, return_tensors="pt").to(device)
-        #inputs = tokenize_with_left_truncation(self.tokenizer, prompts, max_length=self.model_max_length, 
-        #                                       return_tensors="pt").to(device)
-        #decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]]*len(prompts), dtype=torch.long).to(device)
-        #logits = self.model(**inputs, decoder_input_ids=decoder_input_ids).logits
-        logits = self.model(**inputs).logits
-        yes_no_logits = logits[:, -1, self.yes_token_ids + self.no_token_ids]
-        yes_no_probs = self.softmax(yes_no_logits)
+        prompts_comp_yes = [p + self.prompt_yes for p in prompts]
+        prompts_comp_no = [p + self.prompt_no for p in prompts]
         
-        yes_probs = yes_no_probs[:, :len(self.yes_token_ids)].sum(dim=-1)
-        no_probs = yes_no_probs[:, -len(self.no_token_ids):].sum(dim=-1)
-        scores = yes_probs - no_probs
+        inputs_yes = self.tokenizer(prompts_comp_yes, padding=True, add_special_tokens=False, return_tensors="pt").to(device)
+        inputs_no = self.tokenizer(prompts_comp_no, padding=True, add_special_tokens=False, return_tensors="pt").to(device)
+
+        yes_logits = self.model(**inputs_yes).logits
+        no_logits = self.model(**inputs_no).logits
+        
+        yes_ppl = torch.exp(self.get_lm_loss(yes_logits, inputs_yes.input_ids))
+        no_ppl = torch.exp(self.get_lm_loss(no_logits, inputs_no.input_ids))
+        
+        scores = (yes_ppl - no_ppl) / (yes_ppl + no_ppl)
         scores_false = [scores[i] for i in range(scores.size(0)) if i != true_index]
         scores_true = [scores[true_index] for i in range(scores.size(0) - 1)]
         
         return scores, scores_false, scores_true
+    
+    def get_lm_loss(self, logits, labels):
+        #Adapted from forward() in Transformers modeling_xglm.py
+        #to get loss for each example instead of for the whole batch.
+        shift_labels = labels.new_zeros(labels.shape)
+        shift_labels[:, :-1] = labels[:, 1:].clone()
+        shift_labels[:, -1] = self.model.config.pad_token_id
+        
+        logits = torch.permute(logits, (0, 2, 1))
+        loss = self.loss_fct(logits, shift_labels).mean(dim=-1)
+        return loss
+        
