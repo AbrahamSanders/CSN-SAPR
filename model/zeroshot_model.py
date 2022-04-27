@@ -1,14 +1,20 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 import torch.nn as nn
 import torch
 
 class CSN_Zeroshot(nn.Module):
     def __init__(self, args):
         super(CSN_Zeroshot, self).__init__()
+        
         self.tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         if not self.tokenizer._pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model = AutoModelForCausalLM.from_pretrained(args.bert_pretrained_dir)
+        config = AutoConfig.from_pretrained(args.bert_pretrained_dir)
+        if config.is_encoder_decoder:
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(args.bert_pretrained_dir)
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(args.bert_pretrained_dir)
+            
         self.loss_fct = nn.CrossEntropyLoss(reduction="none")
         
         if args.prompt_lang == "zh":
@@ -37,22 +43,29 @@ class CSN_Zeroshot(nn.Module):
         prompts_comp_yes = [p + self.prompt_yes for p in prompts]
         prompts_comp_no = [p + self.prompt_no for p in prompts]
         
-        inputs_yes = self.tokenizer(prompts_comp_yes, padding=True, add_special_tokens=False, return_tensors="pt").to(device)
-        inputs_no = self.tokenizer(prompts_comp_no, padding=True, add_special_tokens=False, return_tensors="pt").to(device)
-
-        yes_logits = self.model(**inputs_yes).logits
-        no_logits = self.model(**inputs_no).logits
+        yes_ppl = self.get_ppl(prompts_comp_yes, device)
+        no_ppl = self.get_ppl(prompts_comp_no, device)
         
-        yes_ppl = torch.exp(self.get_lm_loss(yes_logits, inputs_yes.input_ids))
-        no_ppl = torch.exp(self.get_lm_loss(no_logits, inputs_no.input_ids))
-        
-        scores = (yes_ppl - no_ppl) / (yes_ppl + no_ppl)
+        scores = (no_ppl - yes_ppl) / (no_ppl + yes_ppl)
         scores_false = [scores[i] for i in range(scores.size(0)) if i != true_index]
         scores_true = [scores[true_index] for i in range(scores.size(0) - 1)]
         
         return scores, scores_false, scores_true
     
-    def get_lm_loss(self, logits, labels):
+    def get_ppl(self, prompts, device):
+        inputs = self.tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+        if self.model.config.is_encoder_decoder:
+            with self.tokenizer.as_target_tokenizer():
+                targets = self.tokenizer(prompts, padding=True, return_tensors="pt").input_ids.to(device)
+            logits = self.model(**inputs, decoder_input_ids=self.model._shift_right(targets)).logits
+        else:
+            targets = inputs.input_ids
+            logits = self.model(**inputs).logits
+        
+        ppl = torch.exp(self._get_lm_loss(logits, targets))
+        return ppl
+    
+    def _get_lm_loss(self, logits, labels):
         #Adapted from forward() in Transformers modeling_xglm.py
         #to get loss for each example instead of for the whole batch.
         shift_labels = labels.new_zeros(labels.shape)
