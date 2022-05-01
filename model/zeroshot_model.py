@@ -12,6 +12,8 @@ class CSN_Zeroshot(nn.Module):
         score_modes = ["lm_probs", "lm_loss"]
         if self.score_mode not in score_modes:
             raise ValueError(f"score_mode must be one of {score_modes}.")
+            
+        self.use_full_context = args.use_full_context
         
         self.tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         if not self.tokenizer._pad_token:
@@ -25,19 +27,19 @@ class CSN_Zeroshot(nn.Module):
         self.loss_fct = nn.CrossEntropyLoss(reduction="none")
         
         if args.prompt_lang == "zh":
-            self.prompt = "文字：'{css}'\n\n问题：那个说{quoted}是{alias}。对或错？\n\n"
+            self.prompt = "背景：{context}\n\n问题：那个说{quoted}是{alias}。对或错？\n\n"
             self.prompt += "答案是" if args.prompt_style == "answer_is" else "回答："
             self.response_yes = "是的"
             self.response_no = "不对"
             self.space = ""
         else:
-            self.prompt = "Text:'{css}'\n\nQuestion: The one who said {quoted} is {alias}. True or false?\n\n"
+            self.prompt = "Context: {context}\n\nQuestion: The one who said {quoted} is {alias}. True or false?\n\n"
             self.prompt += "The answer is" if args.prompt_style == "answer_is" else "Answer:"
             self.response_yes = "true"
             self.response_no = "false"
             self.space = " "
             
-    def forward(self, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device):
+    def forward(self, seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device):
         candidate_aliases = [CSS[cdd_pos[1]:cdd_pos[2]] for cdd_pos, CSS in zip(mention_poses, CSSs)]
         quoted_sentences = []
         for i, (cdd_CSS, cdd_sent_char_lens, cdd_quote_idx) in enumerate(zip(CSSs, sent_char_lens, quote_idxes)):
@@ -46,7 +48,8 @@ class CSN_Zeroshot(nn.Module):
                 accum_char_len.append(accum_char_len[-1] + cdd_sent_char_lens[sent_idx])
             quoted_sentences.append(cdd_CSS[accum_char_len[cdd_quote_idx]:accum_char_len[cdd_quote_idx + 1]])
         
-        prompts = [self.prompt.format(css=css, alias=alias, quoted=quoted)
+        full_context = "".join(["".join([seg for seg in sent]) for sent in seg_sents])
+        prompts = [self.prompt.format(context=full_context if self.use_full_context else css, alias=alias, quoted=quoted)
                    for css, alias, quoted in zip(CSSs, candidate_aliases, quoted_sentences)]
         prompts = [p.replace("“", '"').replace("”", '"') for p in prompts]
         

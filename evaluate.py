@@ -78,7 +78,7 @@ def evaluate(checkpoint_dir, eval_file_path):
 
         with torch.no_grad():
             if zero_shot:
-                scores, _, _ = model(CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                scores, _, _ = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
             else:
                 features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
                 scores, _, _ = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
