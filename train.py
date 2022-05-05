@@ -22,6 +22,7 @@ from utils.load_name_list import get_alias2id
 from utils.bert_features import *
 from utils.training_control import *
 from model.model import CSN
+from model.zeroshot_model import CSN_Zeroshot
 
 
 # training log
@@ -92,8 +93,11 @@ def train():
     print(mention_poses)
 
     # initialize model
-    tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
-    model = CSN(args)
+    if args.model_name == "CSNZeroshot":
+        model = CSN_Zeroshot(args)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
+        model = CSN(args)
     model = model.to(device)
 
     # initialize optimizer
@@ -132,12 +136,15 @@ def train():
         optimizer.zero_grad()
 
         print('Epoch: %d' % (epoch + 1))
-        for i, (_, CSSs, sent_char_lens, mention_poses, quote_idxes, one_hot_label, true_index, _) \
+        for i, (seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, one_hot_label, true_index, _) \
             in enumerate(progress_bar(train_data, total=len(train_data), parent=epoch_bar)):
             
             try:
-                features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
-                scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                if args.model_name == "CSNZeroshot":
+                    scores, scores_false, scores_true = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                else:
+                    features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
+                    scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
 
                 # backward propagation and weights update
                 for x, y in zip(scores_false, scores_true):
