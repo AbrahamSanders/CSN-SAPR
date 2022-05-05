@@ -43,7 +43,7 @@ def get_train_args():
     parser.add_argument('--checkpoint_dir', type=str, default='')
     
     # zero shot
-    parser.add_argument("--num_shots", type=int, default=0)
+    parser.add_argument("--num_shots", type=int, default=10)
     parser.add_argument("--prompt_lang", type=str, default="zh")
     parser.add_argument("--prompt_style", type=str, default="answer")
     parser.add_argument("--score_mode", type=str, default="lm_probs")

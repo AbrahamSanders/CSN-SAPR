@@ -93,7 +93,8 @@ def train():
     print(mention_poses)
 
     # initialize model
-    if args.model_name == "CSNZeroshot":
+    zero_shot = args.model_name == "CSNZeroshot"
+    if zero_shot:
         model = CSN_Zeroshot(args)
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
@@ -140,37 +141,48 @@ def train():
             in enumerate(progress_bar(train_data, total=len(train_data), parent=epoch_bar)):
             
             try:
-                if args.model_name == "CSNZeroshot":
+                if zero_shot:
                     scores, scores_false, scores_true = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                    scores_false = torch.stack(scores_false)
+                    scores_true = torch.stack(scores_true)
+                    loss = loss_fn(scores_false, scores_true, -torch.ones_like(scores_false))
+                    train_loss += loss.item()
+                    
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
                 else:
                     features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
                     scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
 
-                # backward propagation and weights update
-                for x, y in zip(scores_false, scores_true):
-                    # compute loss
-                    loss = loss_fn(x.unsqueeze(0), y.unsqueeze(0), torch.tensor(-1.0).unsqueeze(0).to(device))
-                    train_loss += loss.item()
-                    
-                    # backward propagation
-                    loss /= args.batch_size
-                    loss.backward(retain_graph=True)
-                    backward_counter += 1
-
-                    # update parameters
-                    if backward_counter % args.batch_size == 0:
-                        optimizer.step()
-                        optimizer.zero_grad()
+                    # backward propagation and weights update
+                    for x, y in zip(scores_false, scores_true):
+                        # compute loss
+                        loss = loss_fn(x.unsqueeze(0), y.unsqueeze(0), torch.tensor(-1.0).unsqueeze(0).to(device))
+                        train_loss += loss.item()
+                        
+                        # backward propagation
+                        loss /= args.batch_size
+                        loss.backward(retain_graph=True)
+                        backward_counter += 1
+    
+                        # update parameters
+                        if backward_counter % args.batch_size == 0:
+                            optimizer.step()
+                            optimizer.zero_grad()
 
                 # training accuracy
                 acc_numerator += 1 if scores.max(0)[1].item() == true_index else 0
                 acc_denominator += 1
 
-            except RuntimeError:
-                print('OOM occurs...')
+            except RuntimeError as ex:
+                print(ex)
+                
+            if zero_shot and (i+1) == args.num_shots:
+                break
 
         acc = acc_numerator / acc_denominator
-        train_loss /= len(train_data)
+        train_loss /= (args.num_shots if zero_shot else len(train_data))
 
         # logging
         writer.add_scalar('Loss/train', train_loss, epoch)
