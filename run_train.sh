@@ -1,18 +1,19 @@
-ROOT_DIR=""
-BERT_PRETRAINED_DIR=""
-CHECKPOINT_DIR=""
+#ROOT_DIR=""
+BERT_PRETRAINED_DIR="facebook/xglm-564M"
+CHECKPOINT_DIR="."
 DATA_PREFIX="./data"
 
-source ${ROOT_DIR}/.bashrc
+#source ${ROOT_DIR}/.bashrc
 
-CUDA_VISIBLE_DEVICES=0 python train.py \
---model_name CSN \
+#export CUDA_VISIBLE_DEVICES=1
+python train.py \
+--model_name CSNZeroshot \
 --pooling_type max_pooling \
 --dropout 0.5 \
---optimizer adam \
+--optimizer adamw \
 --margin 1.0 \
---lr 2e-5 \
---num_epochs 50 \
+--lr 5e-5 \
+--num_epochs 1 \
 --batch_size 16 \
 --patience 10 \
 --bert_pretrained_dir ${BERT_PRETRAINED_DIR} \
@@ -25,4 +26,8 @@ ${DATA_PREFIX}/test/test_unsplit.txt \
 --name_list_path \
 ${DATA_PREFIX}/name_list.txt \
 --length_limit 510 \
---checkpoint_dir ${CHECKPOINT_DIR}
+--checkpoint_dir ${CHECKPOINT_DIR} \
+--num_shots 50 \
+--prompt_lang zh \
+--score_mode lm_probs #\
+#--use_full_context

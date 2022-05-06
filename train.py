@@ -15,6 +15,7 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 from transformers import AutoTokenizer
+from transformers.trainer_utils import set_seed
 
 from utils.arguments import get_train_args
 from utils.data_prep import build_data_loader
@@ -30,7 +31,7 @@ LOG_FORMAT = '%(asctime)s %(name)s %(levelname)s %(pathname)s %(message)s'
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S %a'
 
 
-def train():
+def train(seed):
     """
     Training script.
 
@@ -38,6 +39,7 @@ def train():
         best_dev_acc: the best development accuracy.
         best_test_acc: the accuracy on test instances of the model that has the best performance on development instances.
     """
+    set_seed(seed)
     args = get_train_args()
     timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
@@ -93,18 +95,17 @@ def train():
     print(mention_poses)
 
     # initialize model
+    tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
     zero_shot = args.model_name == "CSNZeroshot"
-    if zero_shot:
-        model = CSN_Zeroshot(args)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
-        model = CSN(args)
+    model = CSN_Zeroshot(args) if zero_shot else CSN(args)
     model = model.to(device)
 
     # initialize optimizer
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
     elif args.optimizer == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    elif args.optimizer == "adamw":
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     else:
         raise ValueError("Unknown optimizer type...")
@@ -140,9 +141,15 @@ def train():
         for i, (seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, one_hot_label, true_index, _) \
             in enumerate(progress_bar(train_data, total=len(train_data), parent=epoch_bar)):
             
+            if i == args.num_shots:
+                break
             try:
-                if zero_shot:
-                    scores, scores_false, scores_true = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                if args.num_shots > -1:
+                    if zero_shot:
+                        scores, scores_false, scores_true = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                    else:
+                        features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
+                        scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
                     scores_false = torch.stack(scores_false)
                     scores_true = torch.stack(scores_true)
                     loss = loss_fn(scores_false, scores_true, -torch.ones_like(scores_false))
@@ -177,12 +184,13 @@ def train():
 
             except RuntimeError as ex:
                 print(ex)
-                
-            if zero_shot and (i+1) == args.num_shots:
-                break
 
-        acc = acc_numerator / acc_denominator
-        train_loss /= (args.num_shots if zero_shot else len(train_data))
+        if zero_shot and args.num_shots == 0:
+            acc = -1
+            train_loss = -1
+        else:
+            acc = acc_numerator / acc_denominator
+            train_loss /= (args.num_shots if zero_shot else len(train_data))
 
         # logging
         writer.add_scalar('Loss/train', train_loss, epoch)
@@ -221,12 +229,15 @@ def train():
 
             eval_sum_loss = 0
 
-            for _, CSSs, sent_char_lens, mention_poses, quote_idxes, _, true_index, category \
+            for seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, _, true_index, category \
                 in progress_bar(eval_data, total=len(eval_data), parent=epoch_bar):
                 
                 with torch.no_grad():
-                    features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
-                    scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                    if zero_shot:
+                        scores, scores_false, scores_true = model(seg_sents, CSSs, sent_char_lens, mention_poses, quote_idxes, true_index, device)
+                    else:
+                        features = convert_examples_to_features(examples=CSSs, tokenizer=tokenizer)
+                        scores, scores_false, scores_true = model(features, sent_char_lens, mention_poses, quote_idxes, true_index, device)
                     loss_list = [loss_fn(x.unsqueeze(0), y.unsqueeze(0), torch.tensor(-1.0).unsqueeze(0).to(device)) for x, y in zip(scores_false, scores_true)]
                 
                 eval_sum_loss += sum(x.item() for x in loss_list)
@@ -317,10 +328,11 @@ def train():
 
 if __name__ == '__main__':
     # run several times and calculate average accuracy and standard deviation
+    seeds = [99]#, 199, 299]
     dev = []
     test = []
-    for i in range(3):    
-        dev_acc, test_acc = train()
+    for seed in seeds:    
+        dev_acc, test_acc = train(seed)
         dev.append(dev_acc)
         test.append(test_acc)
 

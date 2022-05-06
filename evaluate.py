@@ -29,8 +29,6 @@ def evaluate(checkpoint_dir, eval_file_path):
     output
         Evalution result files under checkpoint_dir
     """
-    zero_shot = checkpoint_dir == "CSNZeroshot"
-
     parser = ArgumentParser()
     args = parser.parse_args()
     with open(os.path.join(checkpoint_dir, 'info.json'), 'r', encoding='utf-8') as fin:
@@ -38,6 +36,8 @@ def evaluate(checkpoint_dir, eval_file_path):
 
     print("#######################OPTIONS########################")
     print(json.dumps(vars(args), indent=4))
+
+    zero_shot = args.model_name == "CSNZeroshot"
 
     device = torch.device('cuda:0')
 
@@ -62,7 +62,7 @@ def evaluate(checkpoint_dir, eval_file_path):
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.bert_pretrained_dir)
         model = CSN(args)
-        model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'csn.ckpt'), map_location='cpu')['model'])
+    model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'csn.ckpt'), map_location='cpu')['model'])
     model = model.to(device)
 
     # Evaluation
@@ -193,6 +193,6 @@ def evaluate(checkpoint_dir, eval_file_path):
 
 
 if __name__ == '__main__':
-    CHECKPOINT_DIR = 'CSNZeroshot'
+    CHECKPOINT_DIR = './CSNZeroshot/20220506032211'
     TEST_FILE_PATH = './data/test/test_unsplit.txt'
     evaluate(CHECKPOINT_DIR, TEST_FILE_PATH)
